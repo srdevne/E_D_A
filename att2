@@ -1,0 +1,239 @@
+import streamlit as st
+import pandas as pd
+import pymysql
+import plotly.express as px
+import plotly.graph_objects as go
+import plotly.subplots as sp
+import plotly.figure_factory as ff
+import itertools
+from scipy.stats import stats
+from sklearn.decomposition import PCA
+
+def data_input_v3():
+    st.title("Exploratory Data Analysis Tool - Version 3")
+
+    # User chooses between File Upload or Database Connection
+    data_source = st.radio("Select Data Source:", ("File Upload", "Database Connection"))
+
+    if data_source == "File Upload":
+        st.write("Upload your CSV or Excel file:")
+        uploaded_file = st.file_uploader("Choose a file", type=["csv", "xlsx"])
+
+        if uploaded_file is not None:
+            try:
+                data = pd.read_csv(uploaded_file)
+            except Exception as e:
+                try:
+                    data = pd.read_excel(uploaded_file)
+                except Exception as e:
+                    st.error("Error: Unable to read the uploaded file. Please make sure you upload a valid CSV or Excel file.")
+                    return
+            if st.button("Perform Basic Analysis"):
+                basic_analysis(data)
+            if st.button("Perform Uni-variate Analysis"):
+                Univariate_Analysis(data)
+            if st.button("Generate Heatmap"):
+                generate_heatmap(data)
+            if st.button("Perform Bi-variate Analysis"):
+                bivariate_analysis(data)
+            if st.button("Perform Multi-variate Analysis"):
+                multivariate_analysis(data)
+            if st.button("Perform Dimensionality Reduction Analysis"):
+                dimensionality_reduction(data)
+
+    elif data_source == "Database Connection":
+        st.write("Enter your database connection details:")
+        host = st.text_input("Host", "localhost")
+        username = st.text_input("Username", "root")
+        password = st.text_input("Password", type="password")
+        database_name = st.text_input("Database Name", "my_database")
+        sql_query = st.text_area("SQL Query", "SELECT * FROM my_table")
+
+        if st.button("Fetch Data"):
+            try:
+                connection = pymysql.connect(host=host, user=username, password=password, database=database_name)
+                data = pd.read_sql(sql_query, connection)
+                connection.close()
+            except Exception as e:
+                st.error("Error: Unable to fetch data from the database. Please check your connection details and SQL query.")
+                return
+            if st.button("Perform Basic Analysis"):
+                basic_analysis(data)
+            if st.button("Perform Uni-variate Analysis"):
+                Univariate_Analysis(data)
+            # if st.button("Generate Heatmap"):
+            #     generate_heatmap(data)
+            if st.button("Generate Heatmap"):
+                generate_heatmap(data)
+            if st.button("Perform Bi-variate Analysis"):
+                bivariate_analysis(data)
+            if st.button("Perform Multi-variate Analysis"):
+                multivariate_analysis(data)
+            if st.button("Perform Dimensionality Reduction Analysis"):
+                dimensionality_reduction(data)
+
+
+
+def basic_analysis(data):
+    st.write("Data Preview:")
+    st.write(data.head())
+    # Consolidate Basic Analysis Outputs into a Summary Table
+    basic_analysis_summary = pd.DataFrame({
+        "Null Count": data.isnull().sum(),
+        "Null Percentage": data.isnull().mean() * 100,
+        "Unique Count": data.nunique(),
+        "Data Type": data.dtypes
+    })
+    # Add .describe() method to each column to include additional statistics
+    numeric_columns = data.select_dtypes(include=["number"])
+    additional_stats = numeric_columns.describe().transpose()
+    basic_analysis_summary = pd.concat([basic_analysis_summary, additional_stats], axis=1)
+    st.write("Enhanced Basic Analysis Summary:")
+    st.write(basic_analysis_summary)
+
+
+def Univariate_Analysis(data):
+    st.title("Data Visualization")
+    numeric_columns = data.select_dtypes(include=["int64", "float64"]).columns
+    object_columns = data.select_dtypes(include=["object"]).columns
+    # Plot histograms, scatter plots, and box plots for numeric columns
+    fig = sp.make_subplots(rows=len(numeric_columns), cols=3,
+                           subplot_titles=["" for _ in range(3 * len(numeric_columns))],
+                           shared_yaxes=False)
+    for i, column in enumerate(numeric_columns, start=1):
+        fig.add_trace(go.Histogram(x=data[column], name=f"{column} Histogram"), row=i, col=1)
+        for j, scatter_column in enumerate(numeric_columns, start=1):
+            if column != scatter_column:
+                fig.add_trace(go.Scatter(x=data[column], y=data[scatter_column], mode="markers",
+                                         name=f"{column} vs {scatter_column} Scatter Plot"), row=i, col=2)
+        fig.add_trace(go.Box(y=data[column],name=f"{column} Box Plot"), row=i, col=3)
+    # Set subplot titles only once per row
+    for i, column in enumerate(numeric_columns, start=1):
+        fig.update_xaxes(title_text=f"{column}", row=i, col=1)
+        fig.update_xaxes(title_text=f"{column}", row=i, col=2)
+        fig.update_xaxes(title_text=f"{column}", row=i, col=3)
+    fig.update_layout(showlegend=False, height=len(numeric_columns) * 400, width=1000)
+    st.plotly_chart(fig)
+    # Plot bar charts for object columns and scatter plots for numeric-object combinations
+    for column in object_columns:
+        st.subheader(f"Bar Chart for Column: {column}")
+        fig_bar_chart = px.bar(data, x=column, title=f"{column} Bar Chart",height=600,width=1000)
+        st.plotly_chart(fig_bar_chart)
+        for numeric_column in numeric_columns:
+            st.subheader(f"Scatter Plot for {numeric_column} vs {column}")
+            fig_scatter = px.scatter(data, x=column, y=numeric_column,height=600,width=1000,
+                                     title=f"{numeric_column} vs {column} Scatter Plot")
+            st.plotly_chart(fig_scatter)
+
+def generate_heatmap(data):
+    st.title("Heatmap - Correlation between Numerical Columns")
+    # Select only numerical columns for the heatmap
+    numerical_data = data.select_dtypes(include=["int64", "float64"])
+    if not numerical_data.empty:
+        correlation_matrix = numerical_data.corr(method="pearson")
+        fig_heatmap = go.Figure(data=go.Heatmap(z=correlation_matrix.values,x=correlation_matrix.columns,
+                                               y=correlation_matrix.index,colorscale='Viridis'))
+        fig_heatmap.update_layout(title="Correlation Heatmap (Method: Pearson Correlation)",
+                                  xaxis_title="Column",yaxis_title="Column",height=800, width=1000)
+        st.plotly_chart(fig_heatmap)
+    else:
+        st.warning("No numerical columns found for the heatmap.")
+
+def bivariate_analysis(data):
+    numerical_data = data.select_dtypes(include=["int64", "float64"])
+    numerical_columns = numerical_data.columns
+    combinations = itertools.combinations(numerical_columns, 2)
+    for column1, column2 in combinations:
+        scatter_plot = go.Figure(data=go.Scatter(x=data[column1], y=data[column2], mode='markers'))
+        scatter_plot.update_layout(title=f"{column1} vs {column2} Scatter Plot",
+                                   xaxis_title=column1,yaxis_title=column2,height=600,width=1000)
+        st.plotly_chart(scatter_plot)
+
+    categorical_data = data.select_dtypes(include=["object"])
+    categorical_columns = categorical_data.columns
+    if not categorical_data.empty:
+        columns = categorical_data.columns
+        contingency_table_data = []
+        for col1 in columns:
+            row = []
+            for col2 in columns:
+                contingency_table = pd.crosstab(data[col1], data[col2])
+                row.append(contingency_table)
+            contingency_table_data.append(row)
+        # Display contingency tables using Plotly Figure Factory
+        for i, col1 in enumerate(columns):
+            for j, col2 in enumerate(columns):
+                st.subheader(f"{col1} vs {col2}")
+                fig_contingency_table = ff.create_table(contingency_table_data[i][j])
+                st.plotly_chart(fig_contingency_table)
+    else:
+        st.warning("No categorical columns found for the contingency table.")
+    # Perform chi-square test
+    pairs_cat = list(itertools.combinations(categorical_columns, 2))
+    for pair in pairs_cat:
+        x, y = pair[0], pair[1]
+        contingency_table = pd.crosstab(data[x], data[y])
+        fig = go.Figure(
+            data=go.Heatmap(z=contingency_table.values, x=contingency_table.columns, y=contingency_table.index,
+                            colorscale='Viridis'))
+        fig.update_layout(title=f"Contingency Table: {x} vs {y}", xaxis_title=x, yaxis_title=y)
+        # Perform chi-square test
+        chi2, p, _, _ = stats.chi2_contingency(contingency_table)
+        fig.add_annotation(text=f"Chi-square test: p-value = {p:.4f}", xref="paper", yref="paper",
+                           x=0.5, y=-0.15, showarrow=False, font=dict(size=12), bgcolor="#ffffff",
+                           bordercolor="#000000",
+                           borderwidth=1, borderpad=5)
+
+def multivariate_analysis(data):
+    st.title("Multivariate Scatter Plot")
+    # Select only numerical columns for the scatter plot
+    numerical_data = data.select_dtypes(include=["int64", "float64"])
+    if len(numerical_data.columns) >= 3:
+        fig_multivariate_scatter = px.scatter_matrix(numerical_data,height=800,width=1000)
+        st.plotly_chart(fig_multivariate_scatter)
+    else:
+        st.warning("At least 3 numerical columns are required for the multivariate scatter plot.")
+# parallel_coordinates_plot
+    st.title("Parallel Coordinates Plot")
+    if not numerical_data.empty:
+        fig_parallel_coordinates = px.parallel_coordinates(numerical_data, color=data.columns[0],height=800,width=1000)
+        st.plotly_chart(fig_parallel_coordinates)
+    else:
+        st.warning("No numerical columns found for the parallel coordinates plot.")
+#     cluster_Analysis
+    st.title("Cluster Analysis")
+    if not numerical_data.empty:
+        fig_cluster = ff.create_dendrogram(numerical_data.T, orientation='left')
+        st.plotly_chart(fig_cluster)
+    else:
+        st.warning("No numerical columns found for the cluster analysis.")
+
+def dimensionality_reduction(data):
+    st.title("Dimensionality Reduction (Principal Component Analysis - PCA)")
+    # Select only numerical columns for PCA
+    numerical_data = data.select_dtypes(include=["int64", "float64"])
+    if not numerical_data.empty:
+        st.write("Number of numerical columns:", len(numerical_data.columns))
+        # Choose the number of components for PCA
+        num_components = st.slider("Select the number of components for PCA:", min_value=1, max_value=len(numerical_data.columns), value=2)
+        # Perform PCA
+        pca = PCA(n_components=num_components)
+        pca_result = pca.fit_transform(numerical_data)
+        # Create a DataFrame to store the PCA results
+        pca_columns = [f"PCA_Component_{i+1}" for i in range(num_components)]
+        pca_df = pd.DataFrame(data=pca_result, columns=pca_columns)
+        # Display the explained variance ratioa
+        st.write("Explained Variance Ratio:")
+        st.bar_chart(pca.explained_variance_ratio_)
+        # Display the PCA DataFrame
+        st.write("PCA DataFrame:")
+        st.dataframe(pca_df)
+    else:
+        st.warning("No numerical columns found for dimensionality reduction (PCA).")
+
+# Main function to run the Streamlit app
+def main():
+    data_input_v3()
+
+if __name__ == "__main__":
+    main()
