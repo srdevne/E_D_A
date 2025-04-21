@@ -37,3 +37,15 @@ def sample_by_grouped_subset(df, subset_cols, total_samples=60, random_state=42)
     # Final output with traceability
     result_df['matching_features'] = len(subset_cols)  # full match on all subset columns
     return result_df
+
+
+# Diagnostic: check how many samples per group_size
+print("Samples per group_size in final sample:")
+print(result_df['group_size'].value_counts().sort_index())
+
+# Compare with expected full group_size counts
+print("\nOriginal population group_size distribution:")
+print(df_with_counts['group_size'].value_counts().sort_index())
+
+# Optional: count how many came from top-up
+print(f"\nTotal sampled: {len(result_df)}")
