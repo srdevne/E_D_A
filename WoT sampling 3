@@ -1,0 +1,39 @@
+import pandas as pd
+import numpy as np
+
+def sample_by_grouped_subset(df, subset_cols, total_samples=60, random_state=42):
+    np.random.seed(random_state)
+
+    # Step 1: Group by subset and count occurrences
+    group_counts = df.groupby(subset_cols).size().reset_index(name='group_size')
+
+    # Step 2: Merge back to original DataFrame
+    df_with_counts = df.merge(group_counts, on=subset_cols)
+
+    # Optional: Create a "group ID" for sampling diversity
+    df_with_counts['group_key'] = df_with_counts[subset_cols].astype(str).agg('|'.join, axis=1)
+
+    # Step 3: Group by group_key to sample from each
+    grouped = df_with_counts.groupby('group_key')
+
+    num_groups = grouped.ngroups
+    samples_per_group = max(1, total_samples // num_groups)
+    result_df = pd.DataFrame()
+    remaining = total_samples
+
+    for name, group in grouped:
+        n = min(len(group), samples_per_group)
+        sampled = group.sample(n=n, random_state=random_state)
+        result_df = pd.concat([result_df, sampled], ignore_index=True)
+        remaining -= n
+
+    # Step 4: If under-sampled due to small groups, top up
+    if remaining > 0:
+        extra_pool = df_with_counts.loc[~df_with_counts.index.isin(result_df.index)]
+        if len(extra_pool) >= remaining:
+            top_up = extra_pool.sample(n=remaining, random_state=random_state)
+            result_df = pd.concat([result_df, top_up], ignore_index=True)
+
+    # Final output with traceability
+    result_df['matching_features'] = len(subset_cols)  # full match on all subset columns
+    return result_df
