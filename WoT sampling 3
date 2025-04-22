@@ -49,3 +49,69 @@ print(df_with_counts['group_size'].value_counts().sort_index())
 
 # Optional: count how many came from top-up
 print(f"\nTotal sampled: {len(result_df)}")
+
+
+def sample_by_grouped_subset_unique(
+    df,
+    subset_cols,
+    total_samples=60,
+    id_col=None,
+    random_state=42
+):
+    np.random.seed(random_state)
+
+    # Step 1: Group by subset and get group sizes
+    group_counts = df.groupby(subset_cols).size().reset_index(name='group_size')
+
+    # Step 2: Merge group_size back to original df
+    df_with_counts = df.merge(group_counts, on=subset_cols)
+    df_with_counts = df_with_counts.reset_index(drop=True)
+
+    # Optional: if an identifier column is specified, enforce uniqueness before sampling
+    if id_col:
+        df_with_counts = df_with_counts.drop_duplicates(subset=[id_col])
+
+    # Step 3: Group by group_size
+    grouped = df_with_counts.groupby('group_size')
+    num_groups = grouped.ngroups
+    samples_per_group = max(1, total_samples // num_groups)
+
+    result_df = pd.DataFrame()
+    sampled_ids = set()
+
+    # Step 4: Sample from each group
+    for size, group in grouped:
+        # Avoid duplicates using id_col
+        if id_col:
+            group = group[~group[id_col].isin(sampled_ids)]
+
+        n = min(len(group), samples_per_group)
+        if n > 0:
+            sampled = group.sample(n=n, random_state=random_state)
+            result_df = pd.concat([result_df, sampled], ignore_index=True)
+
+            if id_col:
+                sampled_ids.update(sampled[id_col].tolist())
+
+    # Step 5: Top-up if needed
+    remaining = total_samples - len(result_df)
+    if remaining > 0:
+        if id_col:
+            extra_pool = df_with_counts[~df_with_counts[id_col].isin(sampled_ids)]
+        else:
+            extra_pool = df_with_counts.drop(result_df.index, errors='ignore')
+
+        top_up = extra_pool.sample(n=min(remaining, len(extra_pool)), random_state=random_state)
+        result_df = pd.concat([result_df, top_up], ignore_index=True)
+
+        if id_col:
+            sampled_ids.update(top_up[id_col].tolist())
+
+    # Final step: Add match count column
+    result_df["matching_features"] = len(subset_cols)
+
+    # Final diagnostic
+    if id_col:
+        print(f"Sampled {len(result_df)} rows with {result_df[id_col].nunique()} unique `{id_col}` values.")
+
+    return result_df
